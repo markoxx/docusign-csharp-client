@@ -558,29 +558,24 @@ namespace DocuSign.eSign.Client
         {
             JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
 
-            SecurityTokenDescriptor descriptor = new SecurityTokenDescriptor()
-            {
-                Lifetime = new Lifetime(DateTime.UtcNow, DateTime.UtcNow.AddHours(expiresInHours)),
-            };
+            var descriptor = PrepareSecurityTokenDescriptor(clientId, userId, oauthBasePath, privateKeyFilename, expiresInHours, true);
 
-            descriptor.Subject = new ClaimsIdentity();
-            descriptor.Subject.AddClaim(new Claim("scope", "signature"));
-            descriptor.Subject.AddClaim(new Claim("aud", oauthBasePath));
-            descriptor.Subject.AddClaim(new Claim("iss", clientId));
+            ConfigureJwtAuthorizationFlow(oauthBasePath, handler, descriptor);
+        }
 
-            if (userId != null)
-            {
-                descriptor.Subject.AddClaim(new Claim("sub", userId));
-            }
 
-            if (privateKeyFilename != null)
-            {
-                string pemKey = File.ReadAllText(privateKeyFilename);
-                var rsa = CreateRSAKeyFromPem(pemKey);
-                RsaSecurityKey rsaKey = new RsaSecurityKey(rsa);
-                descriptor.SigningCredentials = new SigningCredentials(rsaKey, SecurityAlgorithms.RsaSha256Signature, SecurityAlgorithms.HmacSha256Signature);
-            }
+        public void ConfigureJwtAuthorizationFlowWithPrivateKeyInString(string clientId, string userId, string oauthBasePath, string privateKey, int expiresInHours)
+        {
+            JwtSecurityTokenHandler handler = new JwtSecurityTokenHandler();
 
+            var descriptor = PrepareSecurityTokenDescriptor(clientId, userId, oauthBasePath, privateKey, expiresInHours, false);
+
+            ConfigureJwtAuthorizationFlow(oauthBasePath, handler, descriptor);
+        }
+
+
+        private void ConfigureJwtAuthorizationFlow(string oauthBasePath, JwtSecurityTokenHandler handler, SecurityTokenDescriptor descriptor)
+        {
             var token = handler.CreateToken(descriptor);
             string jwtToken = handler.WriteToken(token);
 
@@ -606,17 +601,47 @@ namespace DocuSign.eSign.Client
 
             try
             {
-                var response = CallApi(path, Method.POST, queryParams, postBody, headerParams, formParams, fileParams, pathParams, contentType);
+                var response = CallApi(path, Method.POST, queryParams, postBody, headerParams, formParams, fileParams,
+                    pathParams, contentType);
                 TokenResponse tokenInfo = JsonConvert.DeserializeObject<TokenResponse>(((RestResponse)response).Content);
 
                 var config = Configuration.Default;
-                config.AddDefaultHeader("Authorization", string.Format("{0} {1}", tokenInfo.token_type, tokenInfo.access_token));
+                config.AddDefaultHeader("Authorization",
+                    string.Format("{0} {1}", tokenInfo.token_type, tokenInfo.access_token));
             }
             catch (Exception ex)
             {
             }
 
             this.RestClient.BaseUrl = baseUrl;
+        }
+
+        private static SecurityTokenDescriptor PrepareSecurityTokenDescriptor(string clientId, string userId,
+            string oauthBasePath, string privateKey, int expiresInHours, bool isPrivateKeyInFile)
+        {
+            SecurityTokenDescriptor descriptor = new SecurityTokenDescriptor()
+            {
+                Lifetime = new Lifetime(DateTime.UtcNow, DateTime.UtcNow.AddHours(expiresInHours)),
+            };
+
+            descriptor.Subject = new ClaimsIdentity();
+            descriptor.Subject.AddClaim(new Claim("scope", "signature"));
+            descriptor.Subject.AddClaim(new Claim("aud", oauthBasePath));
+            descriptor.Subject.AddClaim(new Claim("iss", clientId));
+
+            if (userId != null)
+            {
+                descriptor.Subject.AddClaim(new Claim("sub", userId));
+            }
+
+            if (privateKey != null)
+            {
+                string pemKey = isPrivateKeyInFile ? File.ReadAllText(privateKey) : privateKey;
+                var rsa = CreateRSAKeyFromPem(pemKey);
+                RsaSecurityKey rsaKey = new RsaSecurityKey(rsa);
+                descriptor.SigningCredentials = new SigningCredentials(rsaKey, SecurityAlgorithms.RsaSha256Signature, SecurityAlgorithms.HmacSha256Signature);
+            }
+            return descriptor;
         }
 
         private static RSA CreateRSAKeyFromPem(string key)
